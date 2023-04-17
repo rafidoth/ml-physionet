@@ -1,0 +1,427 @@
+
+(you have to create different files for different parts of the code according to the names and has to run them as python scripts)
+
+Main.py---------------------
+
+import os
+import sys
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+import torch.optim as optim
+
+from datasets import load_seizure_dataset
+from utils import train, evaluate
+from plots import plot_learning_curves, plot_confusion_matrix
+from models import MyRNN
+
+torch.manual_seed(0)
+if torch.cuda.is_available():
+	torch.cuda.manual_seed(0)
+
+# Set a correct path to the seizure data file you downloaded
+PATH_TRAIN_FILE = "..mydrive/data/training/"
+PATH_VALID_FILE = "..mydrive/data/vaildation/"
+PATH_TEST_FILE = "..mydrive/data/testing/"
+
+# Path for saving model
+PATH_OUTPUT = "../output/physionet/"
+os.makedirs(PATH_OUTPUT, exist_ok=True)
+
+
+
+print("using gpu")
+print(torch.cuda.is_available())
+
+# Some parameters
+MODEL_TYPE = 'RNN'  
+NUM_EPOCHS = 2
+BATCH_SIZE = 50
+USE_CUDA = True  # Set 'True' if you want to use GPU
+NUM_WORKERS = 0  # Number of threads used by DataLoader. You can adjust this according to your machine spec.
+
+train_dataset = load_seizure_dataset(PATH_TRAIN_FILE, MODEL_TYPE)
+valid_dataset = load_seizure_dataset(PATH_VALID_FILE, MODEL_TYPE)
+test_dataset = load_seizure_dataset(PATH_TEST_FILE, MODEL_TYPE)
+
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
+valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters())
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#device = torch.device("cuda" if 1==1 else "cpu")
+model.to(device)
+criterion.to(device)
+
+best_val_acc = 0.0
+train_losses, train_accuracies = [], []
+valid_losses, valid_accuracies = [], []
+
+for epoch in range(NUM_EPOCHS):
+	train_loss, train_accuracy = train(model, device, train_loader, criterion, optimizer, epoch)
+	valid_loss, valid_accuracy, valid_results = evaluate(model, device, valid_loader, criterion)
+
+	train_losses.append(train_loss)
+	valid_losses.append(valid_loss)
+
+	train_accuracies.append(train_accuracy)
+	valid_accuracies.append(valid_accuracy)
+
+	is_best = valid_accuracy > best_val_acc  # let's keep the model that has the best accuracy, but you can also use another metric.
+	if is_best:
+		best_val_acc = valid_accuracy
+		torch.save(model, os.path.join(PATH_OUTPUT, save_file))
+
+plot_learning_curves(train_losses, valid_losses, train_accuracies, valid_accuracies)
+
+best_model = torch.load(os.path.join(PATH_OUTPUT, save_file))
+test_loss, test_accuracy, test_results = evaluate(best_model, device, test_loader, criterion)
+
+class_names = ['W', 'N1', 'N2', 'N3', 'REM']
+plot_confusion_matrix(test_results, class_names)
+
+
+import numpy as np
+import pandas as pd
+from scipy import sparse
+import torch
+from torch.utils.data import TensorDataset, Dataset
+from glob import glob
+import os
+import random
+
+
+TIME_WINDOW_SIZE = 100
+
+def clip_array(x):
+    x = np.clip(x / 20, -5, 5)
+    return x
+
+def load_data(path, num_of_samples = 12):
+    files = sorted(glob(os.path.join(path, "*.npz")))
+    data = []
+    Y = []
+    # randomly sampling:
+    for file in files:
+        npz = np.load(file)
+        for _ in range(num_of_samples):
+            index = random.choice(range(abs(npz['x'].shape[0]-TIME_WINDOW_SIZE)))
+            x = npz['x'][index:index+TIME_WINDOW_SIZE, ...]
+            y = npz['y'][index:index+TIME_WINDOW_SIZE]
+            y = np.expand_dims(y, -1)
+            x = clip_array(x)            
+            data.append(x)
+            Y.append(y)
+       
+    data = np.concatenate(data, axis=0)
+
+    data = np.reshape(data, (data.shape[0],-1))
+
+    Y = np.concatenate(Y)
+    target = []
+    for y in Y:
+        target.append(y[0])
+        
+    return data, np.array(target)
+    
+def load_seizure_dataset(path, model_type):
+  
+    data, target = load_data(path)
+    
+   
+        data = torch.from_numpy(data.astype('float32')).unsqueeze(2)
+        #data = torch.from_numpy(data.astype('float32'))
+        target = torch.from_numpy(target.astype('long')).long()
+        dataset = TensorDataset(data, target)
+   
+    return dataset
+
+datasets.py----------------------------------
+
+import numpy as np
+import pandas as pd
+from scipy import sparse
+import torch
+from torch.utils.data import TensorDataset, Dataset
+from glob import glob
+import os
+import random
+
+
+TIME_WINDOW_SIZE = 100
+
+def clip_array(x):
+    x = np.clip(x / 20, -5, 5)
+    return x
+
+def load_data(path, num_of_samples = 12):
+    files = sorted(glob(os.path.join(path, "*.npz")))
+    data = []
+    Y = []
+    # randomly sampling:
+    for file in files:
+        npz = np.load(file)
+        for _ in range(num_of_samples):
+            index = random.choice(range(abs(npz['x'].shape[0]-TIME_WINDOW_SIZE)))
+            x = npz['x'][index:index+TIME_WINDOW_SIZE, ...]
+            y = npz['y'][index:index+TIME_WINDOW_SIZE]
+            y = np.expand_dims(y, -1)
+            x = clip_array(x)            
+            data.append(x)
+            Y.append(y)
+       
+    data = np.concatenate(data, axis=0)
+
+    data = np.reshape(data, (data.shape[0],-1))
+
+    Y = np.concatenate(Y)
+    target = []
+    for y in Y:
+        target.append(y[0])
+        
+    return data, np.array(target)
+    
+def load_seizure_dataset(path, model_type):
+  
+        data, target = load_data(path)
+    
+   
+        data = torch.from_numpy(data.astype('float32')).unsqueeze(2)
+        #data = torch.from_numpy(data.astype('float32'))
+        target = torch.from_numpy(target.astype('long')).long()
+        dataset = TensorDataset(data, target)
+   
+    return dataset
+
+models.py-------------
+
+import torch
+import torch.nn as nn
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+import torch.nn.functional as F
+
+
+class MyRNN(nn.Module):
+	def __init__(self):
+		super(MyRNN, self).__init__()
+		self.gru = nn.GRU(input_size=1, hidden_size=68, num_layers=2, batch_first=True)
+		self.fc = nn.Linear(in_features=68, out_features=5)
+        
+	def forward(self, x):
+		x, _ = self.gru(x)
+		x = self.fc(x[:, -1, :])
+		return x
+    
+    utils.py---------
+import os
+import time
+import numpy as np
+import torch
+
+
+class AverageMeter(object):
+	"""Computes and stores the average and current value"""
+
+	def __init__(self):
+		self.reset()
+
+	def reset(self):
+		self.val = 0
+		self.avg = 0
+		self.sum = 0
+		self.count = 0
+
+	def update(self, val, n=1):
+		self.val = val
+		self.sum += val * n
+		self.count += n
+		self.avg = self.sum / self.count
+
+
+def compute_batch_accuracy(output, target):
+	"""Computes the accuracy for a batch"""
+	with torch.no_grad():
+
+		batch_size = target.size(0)
+		_, pred = output.max(1)
+		correct = pred.eq(target).sum()
+
+		return correct * 100.0 / batch_size
+
+
+def train(model, device, data_loader, criterion, optimizer, epoch, print_freq=10):
+	batch_time = AverageMeter()
+	data_time = AverageMeter()
+	losses = AverageMeter()
+	accuracy = AverageMeter()
+
+	model.train()
+
+	end = time.time()
+	for i, (input, target) in enumerate(data_loader):
+		# measure data loading time
+		data_time.update(time.time() - end)
+
+		if isinstance(input, tuple):
+			input = tuple([e.to(device) if type(e) == torch.Tensor else e for e in input])
+		else:
+			input = input.to(device)
+		target = target.to(device)
+
+		optimizer.zero_grad()
+		output = model(input)
+		loss = criterion(output, target)
+		assert not np.isnan(loss.item()), 'Model diverged with loss = NaN'
+
+		loss.backward()
+		optimizer.step()
+
+		# measure elapsed time
+		batch_time.update(time.time() - end)
+		end = time.time()
+
+		losses.update(loss.item(), target.size(0))
+		accuracy.update(compute_batch_accuracy(output, target).item(), target.size(0))
+
+		if i % print_freq == 0:
+			print('Epoch: [{0}][{1}/{2}]\t'
+				  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+				  'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+				  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+				  'Accuracy {acc.val:.3f} ({acc.avg:.3f})'.format(
+				epoch, i, len(data_loader), batch_time=batch_time,
+				data_time=data_time, loss=losses, acc=accuracy))
+
+	return losses.avg, accuracy.avg
+
+
+def evaluate(model, device, data_loader, criterion, print_freq=10):
+	batch_time = AverageMeter()
+	losses = AverageMeter()
+	accuracy = AverageMeter()
+
+	results = []
+
+	model.eval()
+
+	with torch.no_grad():
+		end = time.time()
+		for i, (input, target) in enumerate(data_loader):
+
+			if isinstance(input, tuple):
+				input = tuple([e.to(device) if type(e) == torch.Tensor else e for e in input])
+			else:
+				input = input.to(device)
+			target = target.to(device)
+
+			output = model(input)
+			loss = criterion(output, target)
+
+			# measure elapsed time
+			batch_time.update(time.time() - end)
+			end = time.time()
+
+			losses.update(loss.item(), target.size(0))
+			accuracy.update(compute_batch_accuracy(output, target).item(), target.size(0))
+
+			y_true = target.detach().to('cpu').numpy().tolist()
+			y_pred = output.detach().to('cpu').max(1)[1].numpy().tolist()
+			results.extend(list(zip(y_true, y_pred)))
+
+			if i % print_freq == 0:
+				print('Test: [{0}/{1}]\t'
+					  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+					  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+					  'Accuracy {acc.val:.3f} ({acc.avg:.3f})'.format(
+					i, len(data_loader), batch_time=batch_time, loss=losses, acc=accuracy))
+
+	return losses.avg, accuracy.avg, results
+
+plots.py----------------------------------------
+import matplotlib.pyplot as plt
+import numpy as np
+
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import accuracy_score,f1_score,precision_score,recall_score
+from sklearn.utils.multiclass import unique_labels
+def plot_learning_curves(train_losses, valid_losses, train_accuracies, valid_accuracies):
+	
+	plt.figure()
+	plt.plot(np.arange(len(train_losses)), train_losses, label='Train')
+	plt.plot(np.arange(len(valid_losses)), valid_losses, label='Validation')
+	plt.ylabel('Loss')
+	plt.xlabel('epoch')
+	plt.legend(loc="best")
+	plt.savefig("losses_curves.png")
+    
+	plt.figure()
+	plt.plot(np.arange(len(train_accuracies)), train_accuracies, label='Train')
+	plt.plot(np.arange(len(valid_accuracies)), valid_accuracies, label='Validation')
+	plt.ylabel('accuracy')
+	plt.xlabel('epoch')
+	plt.legend(loc="best")
+	plt.savefig("accuracies_curves.png")
+
+	pass
+
+
+def plot_confusion_matrix(results, class_names):
+	
+    #print(results)
+    #print(class_names)
+    # results.extend(list(zip(y_true, y_pred)))
+    transpose = np.array(results).transpose()
+    y_true = list(transpose[0])
+    y_pred = list(transpose[1])
+
+    count = 0
+    for i in y_true: 
+        if i == 0: 
+            count = count + 1
+    count = 0
+    for i in y_pred: 
+        if i == 0: 
+            count = count + 1
+    accuracy=accuracy_score(y_true, y_pred)
+
+    f1=f1_score(y_true, y_pred, average='macro')
+
+    precision=precision_score(y_true, y_pred, average='macro')
+
+    recall=recall_score(y_true, y_pred, average='macro')
+
+   print('accuracy{accuracy:.3f}\t','precision{precision:.3f}\t','recall{recall:.3f}','f1{f1:.3f}\t'.format(accuracy=accuracy,precision=precision,recall=recall))
+    title = 'Normalized confusion matrix'
+    cm = confusion_matrix(y_true, y_pred)
+    classes = class_names
+    cmap=plt.cm.Blues
+    cm = cm.astype('float')/cm.sum(axis=1)[:, np.newaxis]
+    fig, ax = plt.subplots()
+    im = ax.imshow(cm, interpolation='nearest', cmap=cmap)
+    ax.figure.colorbar(im, ax=ax)
+    # We want to show all ticks...
+    ax.set(xticks=np.arange(cm.shape[1]),
+           yticks=np.arange(cm.shape[0]),
+           # ... and label them with the respective list entries
+           xticklabels=classes, yticklabels=classes,title=title,
+           ylabel='True',
+           xlabel='Predicted')
+
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right",rotation_mode="anchor")
+
+    fmt = '.2f'
+    thresh = cm.max() / 2.
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(j, i, format(cm[i, j], fmt), ha="center", va="center",color="white" if cm[i, j] > thresh else "black")
+    fig.tight_layout()
+    
+    plt.savefig("confusion_matrix.png")    
+    pass
+
+
+

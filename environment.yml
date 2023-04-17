@@ -1,0 +1,19 @@
+name: bd4hfinalproject
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.6
+  - pytorch>=1.0.0
+  - torchvision
+  - scikit-learn
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - pytest
+  - pip:
+    - delayed-assert
+    - mne
+    - pyedflib
+prefix: /anaconda3/envs/bd4hfinalproject
